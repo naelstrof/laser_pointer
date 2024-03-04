@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, SocketAddrV4, UdpSocket, ToSocketAddrs};
+use std::net::{UdpSocket, ToSocketAddrs};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -13,7 +13,6 @@ use std::thread;
 use clap::Parser;
 use winit::event::MouseButton;
 use std::error::Error;
-use std::str::FromStr;
 use std::process::exit;
 use igd::{PortMappingProtocol, search_gateway, SearchOptions};
 
@@ -33,15 +32,40 @@ impl LaserPointerState {
 fn main() -> Result<(), Box<dyn Error>> {
     let config : Config = Config::new();
 
-
+    let valid_ports : [u16;6] = *&[51124, 51125, 51126, 51127, 51128, 51129];
     return if config.pointer {
-        client(config)
+        client(config, valid_ports)
     } else {
-        server(config)
+        server(config, valid_ports)
     }
 }
 
-fn client(config: Config) -> Result<(), Box<dyn Error>> {
+fn get_socket(valid_ports : [u16;6], should_forward_port : bool) -> Result<UdpSocket, Box<dyn Error>> {
+    for port in valid_ports.iter() {
+        println!("Attempting to bind to port {}", port);
+        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", port)) {
+            Ok(socket) => socket,
+            Err(error) => {
+                println!("Failed to bind to port: {}", error);
+                continue
+            },
+        };
+        if should_forward_port {
+            match forward_ports(*port) {
+                Ok(_) => return Ok(socket),
+                Err(error) => {
+                    println!("Failed to forward port: {}", error);
+                    continue
+                }
+            }
+        }
+        println!("Successfully bound to port {}!", port);
+        return Ok(socket);
+    }
+    return Err(Box::from("Couldn't bind to the network, all tries failed..."));
+}
+
+fn client(config: Config, valid_ports : [u16;6]) -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().with_title("Laser Pointer").build(&event_loop).unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -50,7 +74,7 @@ fn client(config: Config) -> Result<(), Box<dyn Error>> {
     let (tx, rx): (Sender<LaserPointerState>, Receiver<LaserPointerState>) = channel();
 
     thread::spawn(move || {
-        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind to socket");
+        let socket = get_socket(valid_ports,false).expect("Failed to connect to socket.");
         let server_details = config.address;
         let server: Vec<_> = server_details.to_socket_addrs().expect("Unable to resolve domain") .collect();
         loop {
@@ -115,15 +139,13 @@ fn client(config: Config) -> Result<(), Box<dyn Error>> {
 }
 
 fn forward_ports(port : u16) -> Result<(), Box<dyn Error>> {
-    let local_addr = local_ip_addr::get_local_ip_address()?;
-    println!("Your local ip is {}", local_addr);
-
     let gateway = search_gateway(SearchOptions::default())?;
     let ip = gateway.get_external_ip()?;
-    println!("Your external ip is {}", ip);
-
+    let local_addr = local_ip_addr::get_local_ip_address()?;
     let local_addr = format!("{}:{}", local_addr, port).parse().expect("Failed to get local socket.");
     gateway.add_port(PortMappingProtocol::UDP, port, local_addr, 38000, "Laser pointer!")?;
+    println!("Your external ip is {}", ip);
+    println!("Your local ip is {}", local_addr);
     println!("Successfully forwarded port {} => {}", port, local_addr);
     println!("Send this to your friend: {}:{}", ip, port);
 
@@ -133,16 +155,15 @@ fn forward_ports(port : u16) -> Result<(), Box<dyn Error>> {
 fn delete_ports(port : u16) -> Result<(), Box<dyn Error>> {
     let gateway = search_gateway(Default::default())?;
     gateway.remove_port(PortMappingProtocol::UDP, port)?;
-    println!("Successfully unforwarded port {}", port);
+    println!("Successfully un-forwarded port {}", port);
     Ok(())
 }
 
-fn server(config: Config) -> Result<(), Box<dyn Error>> {
+fn server(config: Config, valid_ports : [u16;6]) -> Result<(), Box<dyn Error>> {
     let (tx, rx): (Sender<LaserPointerState>, Receiver<LaserPointerState>) = channel();
-    let socket = UdpSocket::bind(config.address)?;
+    let socket = get_socket(valid_ports, true)?;
     println!("Bound to {}", socket.local_addr().unwrap().to_string());
     let port = socket.local_addr()?.port();
-    forward_ports(port).expect("Failed to forward ports!");
 
     ctrlc::set_handler(move || {
         delete_ports(port).unwrap();
@@ -150,7 +171,6 @@ fn server(config: Config) -> Result<(), Box<dyn Error>> {
     }).expect("Failed to set ctrl+c handler.");
 
     thread::spawn(move || {
-        println!("Listening to socket!!");
         let mut buf = [0; 99];
         loop {
             let (amt, _src) = socket.recv_from(&mut buf).expect("Failed to receive packet.");
