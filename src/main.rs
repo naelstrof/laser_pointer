@@ -1,11 +1,11 @@
-use std::net::{UdpSocket, ToSocketAddrs};
+use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
 use winit::dpi::{LogicalPosition, LogicalSize};
-use winit::window::WindowLevel;
+use winit::window::{Window, WindowLevel};
 use serde::{Serialize, Deserialize};
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc::channel;
@@ -15,12 +15,19 @@ use winit::event::MouseButton;
 use std::error::Error;
 use std::process::exit;
 use igd::{PortMappingProtocol, search_gateway, SearchOptions};
+use std::collections::HashMap;
+use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
 
 #[derive(Serialize,Deserialize,Debug,Copy,Clone)]
 struct LaserPointerState {
     visible : bool,
     x : f32,
     y : f32,
+}
+
+struct Packet {
+    owner : SocketAddr,
+    state : LaserPointerState,
 }
 
 impl LaserPointerState {
@@ -83,7 +90,7 @@ fn client(config: Config, valid_ports : [u16;6]) -> Result<(), Box<dyn Error>> {
             match rx.try_iter().last() {
                 None => {}
                 Some(item) => {
-                    println!("Sent {} to {}", serde_json::to_string(&item).unwrap(), server[0]);
+                    //println!("Sent {} to {}", serde_json::to_string(&item).unwrap(), server[0]);
                     socket.send_to(serde_json::to_string(&item).unwrap().as_bytes(), server[0]).expect("Failed to send packet");
                 }
             }
@@ -144,11 +151,8 @@ fn forward_ports(port : u16) -> Result<(), Box<dyn Error>> {
     let local_addr = local_ip_addr::get_local_ip_address()?;
     let local_addr = format!("{}:{}", local_addr, port).parse().expect("Failed to get local socket.");
     gateway.add_port(PortMappingProtocol::UDP, port, local_addr, 38000, "Laser pointer!")?;
-    println!("Your external ip is {}", ip);
-    println!("Your local ip is {}", local_addr);
-    println!("Successfully forwarded port {} => {}", port, local_addr);
+    println!("Successfully forwarded port {}:{} => {}", ip, port, local_addr);
     println!("Send this to your friend: {}:{}", ip, port);
-
     Ok(())
 }
 
@@ -159,10 +163,9 @@ fn delete_ports(port : u16) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn server(config: Config, valid_ports : [u16;6]) -> Result<(), Box<dyn Error>> {
-    let (tx, rx): (Sender<LaserPointerState>, Receiver<LaserPointerState>) = channel();
+fn server(_config: Config, valid_ports : [u16;6]) -> Result<(), Box<dyn Error>> {
+    let (tx, rx): (Sender<Packet>, Receiver<Packet>) = channel();
     let socket = get_socket(valid_ports, true)?;
-    println!("Bound to {}", socket.local_addr().unwrap().to_string());
     let port = socket.local_addr()?.port();
 
     ctrlc::set_handler(move || {
@@ -173,64 +176,52 @@ fn server(config: Config, valid_ports : [u16;6]) -> Result<(), Box<dyn Error>> {
     thread::spawn(move || {
         let mut buf = [0; 99];
         loop {
-            let (amt, _src) = socket.recv_from(&mut buf).expect("Failed to receive packet.");
+            let (amt, src) = socket.recv_from(&mut buf).expect("Failed to receive packet.");
             let buf = &mut buf[..amt];
-            println!("Got {}", String::from_utf8(buf.to_vec()).expect("Failed to convert packet to utf8"));
-            tx.send(serde_json::from_slice(buf).expect("Failed to deserialize packet")).expect("Failed to communicate with main thread.");
+            let state = serde_json::from_slice(buf).expect("Failed to deserialize packet");
+            tx.send(Packet {
+                owner: src,
+                state
+            }).expect("Failed to communicate with main thread.");
         }
     });
 
+    let mut user_windows = HashMap::new();
     let event_loop = EventLoop::new().expect("Failed to build event loop");
+    event_loop.set_control_flow(ControlFlow::Wait);
+    loop {
+        let user_packet = rx.recv().expect("Failed to communicate with server thread.");
+        if !user_windows.contains_key(&user_packet.owner) {
+            println!("Got a new connection from {}!", user_packet.owner.to_string());
+            user_windows.insert(user_packet.owner.clone(), create_server_window(&event_loop));
+        }
+        let window = &user_windows[&user_packet.owner];
+        let monitor_size = window.primary_monitor().expect("Failed to detect primary monitor.").size();
+        let state = user_packet.state;
+        if state.visible {
+            window.set_outer_position(LogicalPosition::new(state.x * monitor_size.width as f32, state.y * monitor_size.height as f32));
+        } else {
+            window.set_outer_position(LogicalPosition::new(-1000,-1000));
+        }
+        window.request_redraw();
+    }
+    delete_ports(port).expect("Failed to unforward ports!");
+    Ok(())
+}
+
+fn create_server_window(event_loop : &EventLoop<()>) -> Window {
     let window = WindowBuilder::new().with_title("Laser Pointer")
         .with_decorations(false)
-        .with_inner_size(LogicalSize::new(64,64))
+        .with_inner_size(LogicalSize::new(24, 24))
         .with_resizable(false)
         .with_window_level(WindowLevel::AlwaysOnTop)
         .with_transparent(true)
         .build(&event_loop).expect("Failed to build window");
 
     window.set_cursor_hittest(false).expect("Failed to set window to be passthrough.");
-    window.set_outer_position(LogicalPosition::new(-1000,-1000));
-
-    event_loop.set_control_flow(ControlFlow::Poll);
-
-    event_loop.run(move |event, elwt| {
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                println!("The close button was pressed; stopping");
-                elwt.exit();
-            },
-            Event::AboutToWait => {
-                let laser_pointer_state = match rx.try_recv() {
-                    Ok(state) => state,
-                    Err(_) => {
-                        window.request_redraw();
-                        return;
-                    }
-                };
-                let monitor_size = window.primary_monitor().expect("Failed to detect primary monitor.").size();
-                if laser_pointer_state.visible {
-                    window.set_outer_position(LogicalPosition::new(laser_pointer_state.x * monitor_size.width as f32, laser_pointer_state.y * monitor_size.height as f32));
-                } else {
-                    window.set_outer_position(LogicalPosition::new(-1000,-1000));
-                }
-                window.request_redraw();
-            },
-            Event::WindowEvent {
-                event: WindowEvent::RedrawRequested,
-                ..
-            } => {
-            },
-            _ => ()
-        }
-    }).expect("Failed to run window loop...");
-    delete_ports(port).expect("Failed to unforward ports!");
-    Ok(())
+    window.set_outer_position(LogicalPosition::new(-1000, -1000));
+    return window;
 }
-
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
