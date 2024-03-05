@@ -60,11 +60,21 @@ fn get_socket(valid_ports : &[u16], should_forward_port : bool) -> Result<UdpSoc
                 continue
             },
         };
+
         if should_forward_port {
-            let gateway = search_gateway(SearchOptions::default());
+            let local_ip = local_ip_addr::get_local_ip_address()?;
+            let local_ip = format!("{}:0", local_ip);
+            let local_ip : SocketAddr = local_ip.parse()?;
+            println!("Searching for gateway on {}", local_ip);
+            let search_options = SearchOptions {
+                bind_addr: local_ip,
+                .. SearchOptions::default()
+            };
+            let gateway = search_gateway(search_options);
             if gateway.is_err() {
-                println!("Couldn't automatically forward the port because the gateway couldn't be found: {:?}", gateway.err());
-                println!("You will need to forward the port {} yourself, or double check your NAT setup.", port);
+                println!("Port forwarding failed: Gateway couldn't be found: {:?}", gateway.err());
+                println!("You will need to forward port {} yourself.", port);
+                println!("Running normally from here, but you'll need to share your own public IP (not your local) and the above port.");
                 return Ok(socket);
             }
             match forward_ports(gateway.unwrap(), *port) {
@@ -195,6 +205,8 @@ fn forward_ports(gateway: Gateway, port : u16) -> Result<(), Box<dyn Error>> {
     let local_addr = format!("{}:{}", local_addr, port).parse().expect("Failed to get local socket.");
     gateway.add_port(PortMappingProtocol::UDP, port, local_addr, 38000, "Laser pointer!")?;
     println!("Successfully forwarded port {}:{} => {}", ip, port, local_addr);
+    println!("Press CTRL+C on this window to close it.");
+    println!("--");
     println!("Send this to your friend: {}:{}", ip, port);
     Ok(())
 }
