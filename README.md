@@ -1,5 +1,7 @@
 # laser_pointer
 
+https://github.com/naelstrof/laser_pointer/assets/1131571/caad58f2-53f0-4422-ab96-196db587efc1
+
 An app designed to allow a tutor to point at things on a student's screen remotely. It's best paired with a streaming
 app like discord.
 
