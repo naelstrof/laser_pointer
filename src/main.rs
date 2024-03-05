@@ -24,6 +24,7 @@ use winit::event_loop::EventLoopWindowTarget;
 use winit::platform::windows::WindowBuilderExtWindows;
 use laminar::{Socket, Packet, SocketEvent, DeliveryGuarantee};
 
+const CURSOR_SIZE : u32 = 64;
 #[derive(Serialize,Deserialize,Debug,Copy,Clone)]
 struct LaserPointerState {
     visible : bool,
@@ -353,9 +354,9 @@ fn server(_config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error>> {
                         let random_color : u32 = rng.gen();
                         let surface = &mut user_info.surface;
                         let mut buffer = surface.buffer_mut().unwrap();
-                        for index in 0..(24 * 24) {
-                            let y = index / 24;
-                            let x = index % 24;
+                        for index in 0..(CURSOR_SIZE * CURSOR_SIZE) {
+                            let y = index / CURSOR_SIZE;
+                            let x = index % CURSOR_SIZE;
                             let pixel = image.get_pixel(x,y).0;
                             if pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 255 {
                                 buffer[index as usize] = random_color | (255 << 24);
@@ -379,7 +380,7 @@ fn server(_config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error>> {
 fn create_server_window(event_loop : &EventLoopWindowTarget<()>) -> UserWindow {
     let window = Rc::new(WindowBuilder::new().with_title("Laser Pointer")
         .with_decorations(false)
-        .with_inner_size(LogicalSize::new(24, 24))
+        .with_inner_size(LogicalSize::new(64, 64))
         .with_resizable(false)
         .with_skip_taskbar(true)
         .with_window_level(WindowLevel::AlwaysOnTop)
@@ -395,15 +396,15 @@ fn create_server_window(event_loop : &EventLoopWindowTarget<()>) -> UserWindow {
     let context = softbuffer::Context::new(window.clone()).expect("Failed to create graphics context.");
     let mut surface = softbuffer::Surface::new(&context, window.clone()).expect("Failed to create graphics surface.");
 
-    surface.resize(NonZeroU32::new(24).unwrap(), NonZeroU32::new(24).unwrap()).unwrap();
+    surface.resize(NonZeroU32::new(CURSOR_SIZE).unwrap(), NonZeroU32::new(CURSOR_SIZE).unwrap()).unwrap();
     let mut buffer = surface.buffer_mut().unwrap();
 
     let mut rng = rand::thread_rng();
     let random_color : u32 = rng.gen();
 
-    for index in 0..(24 * 24) {
-        let y = index / 24;
-        let x = index % 24;
+    for index in 0..(CURSOR_SIZE * CURSOR_SIZE) {
+        let y = index / CURSOR_SIZE;
+        let x = index % CURSOR_SIZE;
         let pixel = pointer_image.get_pixel(x,y).0;
         if pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 255 {
             buffer[index as usize] = random_color | (255 << 24);
