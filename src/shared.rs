@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const CURSOR_SIZE : u32 = 64;
+
 #[derive(Serialize,Deserialize,Debug,Copy,Clone)]
 pub struct LaserPointerState {
     pub visible : bool,

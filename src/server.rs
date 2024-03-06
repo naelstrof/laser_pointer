@@ -16,9 +16,7 @@ use winit::platform::windows::WindowBuilderExtWindows;
 use std::net::{IpAddr, SocketAddr};
 use softbuffer::Surface;
 use crate::{Config};
-use crate::shared::LaserPointerState;
-
-const CURSOR_SIZE : u32 = 64;
+use crate::shared::{CURSOR_SIZE, LaserPointerState};
 
 struct UserPacket {
     owner : SocketAddr,
@@ -133,6 +131,10 @@ pub fn server(_config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error
                         },
                         DeliveryGuarantee::Reliable => {
                             let image = image::load_from_memory(packet.payload()).expect(format!("{} sent us a bad cursor image, failed to load it!", packet.addr()).as_str());
+                            if image.height() != CURSOR_SIZE || image.width()%CURSOR_SIZE != 0 {
+                                println!("Failed to load user image, its height needs to be {}, and the width needs to be a multiple of {}!", CURSOR_SIZE, CURSOR_SIZE);
+                                return;
+                            }
                             let user_image_packet = UserPacket {
                                 owner: packet.addr(),
                                 data: UserData::Image(image)

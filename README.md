@@ -40,3 +40,50 @@ Then type the following inside (you can right-click to paste):
 but instead of `192.168.1.123:12345` use the address and port that the student gave you. Make sure to press enter to run it.
 
 This should open a window that allows you to click to make a cursor appear on their screen.
+
+## Customizing the cursor
+
+Cursors are customized client-side, and sent to the server.
+
+Cursors are loaded as a spritesheet with frames, horizontally stacked 64x64 images. Below is an example cursor that licks on right-click.
+
+![example cursor](src/gator_dragon_pointer.png)
+
+Animations are loaded via json, supporting 3 states, the idle state is ignored as it won't be visible. All animations are looped. Durations in seconds.
+
+```json
+{
+  "idle": {
+    "frames": [
+      {
+        "index": 0,
+        "duration": 1.0
+      }
+    ]
+  },
+  "visible": {
+    "frames": [
+      {
+        "index": 0,
+        "duration": 1.0
+      }
+    ]
+  },
+  "flashing": {
+    "frames": [
+      {
+        "index": 0,
+        "duration": 0.1
+      },
+      {
+        "index": 1,
+        "duration": 0.1
+      }
+    ]
+  }
+}
+```
+
+```shell
+.\laser_pointer.exe --animation-json-path=./my_custom_animation_states.json
+```

@@ -1,0 +1,30 @@
+{
+    "idle": {
+      "frames": [
+        {
+          "index": 0,
+          "duration": 1.0
+        }
+      ]
+    },
+    "visible": {
+      "frames": [
+        {
+          "index": 0,
+          "duration": 1.0
+        }
+      ]
+    },
+    "flashing": {
+      "frames": [
+        {
+          "index": 1,
+          "duration": 0.1 
+        },
+        {
+          "index": 0,
+          "duration": 0.1 
+        }
+      ]
+    }
+}

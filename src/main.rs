@@ -21,13 +21,16 @@ pub struct Config {
     #[arg(short, long, default_value="0.0.0.0:0")]
     address : String,
     #[arg(short, long, default_value="")]
-    cursor_path: String
+    cursor_path: String,
+    #[arg(long, default_value="")]
+    animation_json_path: String,
 }
 
 impl Config {
     pub fn new () -> Config {
         let mut output = Config::parse();
         output.cursor_path = shellexpand::full(&output.cursor_path).unwrap().to_string();
+        output.animation_json_path = shellexpand::full(&output.animation_json_path).unwrap().to_string();
         output
     }
 }
