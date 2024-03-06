@@ -143,7 +143,6 @@ pub fn client(config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error>
     let (tx, rx): (Sender<LaserPointerState>, Receiver<LaserPointerState>) = channel();
 
     let animation_states = get_animations(&config.animation_json_path)?;
-    println!("Using animation states: {}",serde_json::to_string_pretty(&animation_states).unwrap());
 
     let valid_port_clone = valid_ports.to_owned();
     thread::spawn(move || {
