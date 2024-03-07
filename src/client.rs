@@ -6,15 +6,14 @@ use winit::dpi::LogicalSize;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::fs::File;
-use laminar::{Packet, Socket};
 use std::num::NonZeroU32;
 use winit::event::{Event, MouseButton, WindowEvent};
 use image::GenericImageView;
 use winit::platform::windows::WindowBuilderExtWindows;
-use std::net::ToSocketAddrs;
 use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use softbuffer::Surface;
+use steamworks::{Client, SendType, SteamId};
 use crate::{Config};
 use crate::shared::{CURSOR_SIZE, LaserPointerState};
 
@@ -103,21 +102,7 @@ impl MouseState {
     }
 }
 
-fn get_socket(valid_ports : &[u16]) -> Result<Socket, Box<dyn Error>> {
-    for port in valid_ports {
-        println!("Attempting to bind to port {}", port);
-        match Socket::bind(format!("0.0.0.0:{}", port)) {
-            Ok(socket) => return Ok(socket),
-            Err(error) => {
-                println!("Failed to bind: {}", error);
-                continue;
-            }
-        };
-    }
-    return Err(Box::from("Failed to find valid socket out of allocated ports..."));
-}
-
-pub fn client(config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error>> {
+pub fn client(config: Config) -> Result<(), Box<dyn Error>> {
     let icon_small_image = include_bytes!("icon.png");
     let icon_small_image = image::load_from_memory(icon_small_image).expect("Failed to load icon image from memory?? uh oh");
     let (icon_width, icon_height) = icon_small_image.dimensions();
@@ -144,14 +129,18 @@ pub fn client(config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error>
 
     let animation_states = get_animations(&config.animation_json_path)?;
 
-    let valid_port_clone = valid_ports.to_owned();
+    let (steam_client, single_client) = Client::init_app(2686900)?;
     thread::spawn(move || {
-        let mut socket= get_socket(&valid_port_clone).expect("Failed to get socket.");
-        let server_details = config.address;
-        let server: Vec<_> = server_details.to_socket_addrs().expect("Unable to resolve domain") .collect();
-        let packet_sender = socket.get_packet_sender();
-        thread::spawn( move || socket.start_polling());
+        loop {
+            single_client.run_callbacks();
+            let interval = std::time::Duration::from_millis(16);
+            thread::sleep(interval);
+        }
+    });
 
+    let steam_server_id = SteamId::from_raw(config.steam_id);
+    thread::spawn(move || {
+        let networking = steam_client.networking();
         if &config.cursor_path != "" {
             let file_bytes = std::fs::read(&config.cursor_path).expect("Failed to read cursor image."); // The file is compressed.
             let image = image::load_from_memory(&*file_bytes).expect("Failed to read cursor image.");
@@ -159,14 +148,12 @@ pub fn client(config: Config, valid_ports : &[u16]) -> Result<(), Box<dyn Error>
                 println!("Failed to load user image, its height needs to be {}, and the width needs to be a multiple of {}!", CURSOR_SIZE, CURSOR_SIZE);
             } else {
                 println!("Sent server a cursor of size {}", &file_bytes.len());
-                let reliable = Packet::reliable_unordered(server[0], file_bytes);
-                packet_sender.send(reliable).expect("Failed to send cursor image.");
+                networking.send_p2p_packet(steam_server_id, SendType::Reliable, &*file_bytes);
             }
         }
         loop {
             let item = rx.recv().expect("Failed to read from main thread.");
-            let unreliable = Packet::unreliable(server[0], Vec::from(serde_json::to_string(&item).unwrap()));
-            packet_sender.send(unreliable).expect("Failed to send packet.");
+            networking.send_p2p_packet(steam_server_id, SendType::Unreliable, serde_json::to_string(&item).unwrap().as_ref());
         }
     });
 
